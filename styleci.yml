@@ -1,0 +1,5 @@
+php:
+  preset: wordpress
+js: true
+css: true
+ts: true

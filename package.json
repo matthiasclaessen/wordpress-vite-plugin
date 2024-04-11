@@ -1,0 +1,58 @@
+{
+  "name": "wordpress-vite-plugin",
+  "version": "0.1.0",
+  "description": "WordPress plugin for Vite.",
+  "keywords": [
+    "wordpress",
+    "vite",
+    "vite-plugin"
+  ],
+  "homepage": "",
+  "repository": {
+    "type": "git"
+  },
+  "license": "ISC",
+  "author": "Matthias Claessen",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "/dist"
+  ],
+  "bin": {
+    "clean-orphaned-assets": "bin/clean.js"
+  },
+  "scripts": {
+    "build": "npm run build-plugin",
+    "build-plugin": "rm -rf dist && npm run build-plugin-types && npm run build-plugin-esm && cp src/dev-server-index.html dist/",
+    "build-plugin-types": "tsc --emitDeclarationOnly",
+    "build-plugin-esm": "esbuild src/index.ts --platform=node --format=esm --outfile=dist/index.js",
+    "lint": "eslint --ext ts ./src ./tests",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "@typescript-eslint/eslint-plugin": "^7.6.0",
+    "@typescript-eslint/parser": "^7.6.0",
+    "esbuild": "^0.20.2",
+    "eslint": "^8.57.0",
+    "typescript": "^5.4.4",
+    "vite": "^5.0.0",
+    "vitest": "^1.4.0"
+  },
+  "peerDependencies": {
+    "vite": "^5.0.0"
+  },
+  "engines": {
+    "node": "^18.0.0 || >=20.0.0"
+  },
+  "dependencies": {
+    "picocolors": "^1.0.0",
+    "vite-plugin-full-reload": "^1.1.0"
+  }
+}
