@@ -6,20 +6,37 @@ import path from 'path';
 import colors from 'picocolors';
 import { Plugin, loadEnv, UserConfig, ConfigEnv, ResolvedConfig, PluginOption } from 'vite';
 import fullReload, { Config as FullReloadConfig } from 'vite-plugin-full-reload';
+import liveReload from 'vite-plugin-live-reload';
 
 interface PluginConfig {
-  // The path or paths of the entry points to compile.
+  /**
+   * The path or paths of the entry points to compile.
+   */
   input: string | string[];
 
-  // WordPress' public directory.
-  // TODO: Remove this and adapt to WordPress folder structure
-  publicDirectory?: string;
+  /**
+   * The temporary directory used for the "hot" file.
+   *
+   * @default 'temp'
+   */
+  tempDirectory?: string;
 
-  // The subdirectory where compiled assets should be written.
+  /**
+   * The subdirectory where compiled assets should be written.
+   *
+   * @default 'build'
+   */
   buildDirectory?: string;
 
-  // The path to the "hot" file.
+  /**
+   * The subdirectory where compiled assets should be written.
+   *
+   * @default `${tempDirectory}/hot`
+   */
   hotFile?: string;
+
+  // The path to the 'vite.settings.json' file.
+  settingsFile?: string;
 
   // The path of the SSR entry point.
   ssr?: string | string[];
@@ -27,7 +44,7 @@ interface PluginConfig {
   // The directory where the SSR bundle should be written.
   ssrOutputDirectory?: string;
 
-  // Configuration for performing full page refresh on PHP file changes.
+  // Configuration for performing full page refresh on PHP (or other) file changes.
   refresh?: boolean | string | string[] | RefreshConfig | RefreshConfig[];
 
   // Utilise the Herd of Valet TLS certificates.
@@ -77,6 +94,12 @@ function resolveWordPressPlugin(pluginConfig: Required<PluginConfig>): WordPress
     '@': '/src/js',
   };
 
+  if (fs.existsSync(process.cwd() + '/temp')) {
+    fs.rmdirSync(process.cwd() + '/temp');
+  } else {
+    fs.mkdirSync(process.cwd() + '/temp');
+  }
+
   return {
     name: 'wordpress',
     enforce: 'post',
@@ -90,6 +113,7 @@ function resolveWordPressPlugin(pluginConfig: Required<PluginConfig>): WordPress
       ensureCommandShouldRunInEnvironment(command, env);
 
       return {
+        plugins: [liveReload(['**.php'])],
         base: userConfig.base ?? (command === 'build' ? resolveBase(pluginConfig, assetUrl) : ''),
         publicDir: userConfig.publicDir ?? false,
         build: {
@@ -98,6 +122,7 @@ function resolveWordPressPlugin(pluginConfig: Required<PluginConfig>): WordPress
           outDir: userConfig.build?.outDir ?? resolveOutDir(pluginConfig, ssr),
           rollupOptions: {
             input: userConfig.build?.rollupOptions?.input ?? resolveInput(pluginConfig, ssr),
+            output: userConfig.build?.rollupOptions?.output ?? resolveOutput(),
           },
           assetsInlineLimit: userConfig.build?.assetsInlineLimit ?? 0,
         },
@@ -151,8 +176,8 @@ function resolveWordPressPlugin(pluginConfig: Required<PluginConfig>): WordPress
       }
     },
     configureServer(server) {
-      const envDir = resolvedConfig.envDir || process.cwd();
-      const appUrl = loadEnv(resolvedConfig.mode, envDir, 'APP_URL').APP_URL ?? undefined;
+      const settings = JSON.parse(fs.readFileSync(pluginConfig.settingsFile, 'utf8'));
+      const appUrl = settings.app_url;
 
       server.httpServer?.once('listening', () => {
         const address = server.httpServer?.address();
@@ -164,8 +189,9 @@ function resolveWordPressPlugin(pluginConfig: Required<PluginConfig>): WordPress
           fs.writeFileSync(pluginConfig.hotFile, viteDevServerUrl);
 
           setTimeout(() => {
-            server.config.logger.info(`\n ${colors.red(`${colors.bold('WordPress')} ${'6.5'}`)} ${colors.dim('plugin')} ${colors.bold(`v${pluginVersion()}`)}`);
+            server.config.logger.info(`\n ${colors.dim('plugin')} ${colors.bold(`v${pluginVersion()}`)}`);
             server.config.logger.info('');
+            server.config.logger.info(`  ${colors.green('➜')}  ${colors.bold('APP_URL')}: ${colors.cyan(appUrl.replace(/:(\d+)/, (_: string, port: string) => `:${colors.bold(port)}`))}`);
 
             if (typeof resolvedConfig.server.https === 'object' && typeof resolvedConfig.server.https.key === 'string') {
               if (resolvedConfig.server.https.key.startsWith('Herd')) {
@@ -180,6 +206,10 @@ function resolveWordPressPlugin(pluginConfig: Required<PluginConfig>): WordPress
         const clean = () => {
           if (fs.existsSync(pluginConfig.hotFile)) {
             fs.rmSync(pluginConfig.hotFile);
+          }
+
+          if (fs.existsSync(pluginConfig.tempDirectory)) {
+            fs.rmdirSync(pluginConfig.tempDirectory);
           }
         };
 
@@ -200,7 +230,7 @@ function resolveWordPressPlugin(pluginConfig: Required<PluginConfig>): WordPress
               fs
                 .readFileSync(path.join(dirname(), 'dev-server-index.html'))
                 .toString()
-                .replace(/{{ APP_URL}}/g, appUrl)
+                .replace(/{{ APP_URL }}/g, appUrl) // Replaces APP_URL in the 'dev-server-index.html' file with the correct url.
             );
           }
           next();
@@ -225,6 +255,14 @@ function ensureCommandShouldRunInEnvironment(command: 'build' | 'serve', env: Re
 }
 
 // TODO: Implement version functions for WordPress.
+/**
+ * The version of WordPress being run.
+ */
+// function wordpressVersion(): string {
+//   // TODO: Use WordPress API to check WP version
+
+//   return '';
+// }
 
 /**
  * The version of the WordPress Vite plugin being run.
@@ -238,7 +276,7 @@ function pluginVersion(): string {
 }
 
 /**
- * Convert the users configuration into a standard structure with defaults.
+ * Convert the user's configuration into a standard structure with defaults.
  */
 function resolvePluginConfig(config: string | string[] | PluginConfig): Required<PluginConfig> {
   if (typeof config === 'undefined') {
@@ -253,11 +291,11 @@ function resolvePluginConfig(config: string | string[] | PluginConfig): Required
     throw new Error('wordpress-vite-plugin: missing configuration for "input".');
   }
 
-  if (typeof config.publicDirectory === 'string') {
-    config.publicDirectory = config.publicDirectory.trim().replace(/^\/+/, '');
+  if (typeof config.tempDirectory === 'string') {
+    config.tempDirectory = config.tempDirectory.trim().replace(/^\/+/, '');
 
-    if (config.publicDirectory === '') {
-      throw new Error("wordpress-vite-plugin: publicDirectory must be a subdirectory. E.g. 'public'.");
+    if (config.tempDirectory === '') {
+      throw new Error("wordpress-vite-plugin: tempDirectory must be a subdirectory. E.g. 'temp'.");
     }
   }
 
@@ -279,12 +317,13 @@ function resolvePluginConfig(config: string | string[] | PluginConfig): Required
 
   return {
     input: config.input,
-    publicDirectory: config.publicDirectory ?? 'public',
+    tempDirectory: config.tempDirectory ?? 'temp',
     buildDirectory: config.buildDirectory ?? 'build',
     ssr: config.ssr ?? config.input,
     ssrOutputDirectory: config.ssrOutputDirectory ?? 'bootstrap/ssr',
     refresh: config.refresh ?? false,
-    hotFile: config.hotFile ?? path.join(config.publicDirectory ?? 'public', 'hot'),
+    hotFile: config.hotFile ?? path.join(config.tempDirectory ?? 'temp', 'hot'),
+    settingsFile: config.settingsFile ?? 'vite.settings.json',
     detectTls: config.detectTls ?? null,
     transformOnServe: config.transformOnServe ?? ((code) => code),
   };
@@ -309,6 +348,35 @@ function resolveInput(config: Required<PluginConfig>, ssr: boolean): string | st
 }
 
 /**
+ * Resolve the Vite output path from the configuration.
+ */
+function resolveOutput(): object {
+  const output = {
+    chunkFileNames: 'js/[name]-[hash].js',
+    entryFileNames: 'js/[name]-[hash].js',
+    assetFileNames: (name: string | undefined) => {
+      if (/\.(gif|jpe?g|png|svg)$/.test(name ?? '')) {
+        return 'images/[name]-[hash][extname]';
+      }
+
+      if (/\.css$/.test(name ?? '')) {
+        console.log(name);
+        return 'css/[name][extname]';
+      }
+
+      if (/\.js$/.test(name ?? '')) {
+        console.log(name);
+        return 'js/[name][extname]';
+      }
+
+      return '[name][extname]';
+    },
+  };
+
+  return output;
+}
+
+/**
  * Resolve the Vite outDir path from the configuration.
  */
 function resolveOutDir(config: Required<PluginConfig>, ssr: boolean): string | undefined {
@@ -316,7 +384,7 @@ function resolveOutDir(config: Required<PluginConfig>, ssr: boolean): string | u
     return config.ssrOutputDirectory;
   }
 
-  return path.join(config.publicDirectory, config.buildDirectory);
+  return path.join(config.buildDirectory);
 }
 
 function resolveFullReloadConfig({ refresh: config }: Required<PluginConfig>): PluginOption[] {
