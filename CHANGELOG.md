@@ -2,4 +2,4 @@
 
 ## v0.1.0 (01-01-2024)
 
-Initial pre-relase
+Initial pre-release
