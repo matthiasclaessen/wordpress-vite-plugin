@@ -7,9 +7,10 @@
     "vite",
     "vite-plugin"
   ],
-  "homepage": "",
+  "homepage": "https://github.com/matthiasclaessen/wordpress-vite-plugin",
   "repository": {
-    "type": "git"
+    "type": "git",
+    "url": "https://github.com/matthiasclaessen/wordpress-vite-plugin"
   },
   "license": "MIT",
   "author": "Matthias Claessen",
@@ -53,7 +54,6 @@
   },
   "dependencies": {
     "picocolors": "^1.0.0",
-    "vite-plugin-full-reload": "^1.1.0",
-    "vite-plugin-live-reload": "^3.0.3"
+    "vite-plugin-full-reload": "^1.1.0"
   }
 }

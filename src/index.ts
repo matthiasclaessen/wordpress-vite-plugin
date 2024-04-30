@@ -6,7 +6,6 @@ import path from 'path';
 import colors from 'picocolors';
 import { Plugin, loadEnv, UserConfig, ConfigEnv, ResolvedConfig, PluginOption } from 'vite';
 import fullReload, { Config as FullReloadConfig } from 'vite-plugin-full-reload';
-import liveReload from 'vite-plugin-live-reload';
 
 interface PluginConfig {
   /**
@@ -67,7 +66,7 @@ type DevServerUrl = `${'http' | 'https'}://${string}:${number}`;
 
 let exitHandlersBound = false;
 
-export const refreshPaths = ['src/js/**', 'src/scripts/**', 'src/scss/**', 'src/sass/**', 'src/less/**', '**.php'].filter((path) => fs.existsSync(path.replace(/\*\*$/, '')));
+export const refreshPaths = ['**.php', 'templates/**/*.php'].filter((path) => fs.existsSync(path.replace(/\*\*$/, '')));
 
 /**
  * WordPress plugin for Vite.
@@ -91,14 +90,8 @@ function resolveWordPressPlugin(pluginConfig: Required<PluginConfig>): WordPress
   let userConfig: UserConfig;
 
   const defaultAliases: Record<string, string> = {
-    '@': '/src/js',
+    '@': '/src',
   };
-
-  if (fs.existsSync(process.cwd() + '/temp')) {
-    fs.rmdirSync(process.cwd() + '/temp');
-  } else {
-    fs.mkdirSync(process.cwd() + '/temp');
-  }
 
   return {
     name: 'wordpress',
@@ -113,28 +106,19 @@ function resolveWordPressPlugin(pluginConfig: Required<PluginConfig>): WordPress
       ensureCommandShouldRunInEnvironment(command, env);
 
       return {
-        plugins: [liveReload(['**.php'])],
         base: userConfig.base ?? (command === 'build' ? resolveBase(pluginConfig, assetUrl) : ''),
-        publicDir: userConfig.publicDir ?? false,
         build: {
           manifest: userConfig.build?.manifest ?? (ssr ? false : 'manifest.json'),
           ssrManifest: userConfig.build?.ssrManifest ?? (ssr ? 'ssr-manifest.json' : false),
           outDir: userConfig.build?.outDir ?? resolveOutDir(pluginConfig, ssr),
           rollupOptions: {
             input: userConfig.build?.rollupOptions?.input ?? resolveInput(pluginConfig, ssr),
-            output: userConfig.build?.rollupOptions?.output ?? resolveOutput(),
+            // output: userConfig.build?.rollupOptions?.output,
           },
           assetsInlineLimit: userConfig.build?.assetsInlineLimit ?? 0,
         },
         server: {
           origin: userConfig.server?.origin ?? '__wordpress_vite_placeholder__',
-          ...(process.env.WORDPRESS
-            ? {
-                host: userConfig.server?.host ?? '0.0.0.0',
-                port: userConfig.server?.port ?? (env.VITE_PORT ? parseInt(env.VITE_PORT) : 5173),
-                strictPort: userConfig.server?.strictPort ?? true,
-              }
-            : undefined),
           ...(serverConfig
             ? {
                 host: userConfig.server?.host ?? serverConfig.host,
@@ -185,7 +169,7 @@ function resolveWordPressPlugin(pluginConfig: Required<PluginConfig>): WordPress
         const isAddressInfo = (x: string | AddressInfo | null | undefined): x is AddressInfo => typeof x === 'object';
 
         if (isAddressInfo(address)) {
-          viteDevServerUrl = userConfig.server?.origin ? (userConfig.server.origin as DevServerUrl) : resolveDevServerUrl(address, server.config);
+          viteDevServerUrl = userConfig.server?.origin ? (userConfig.server.origin as DevServerUrl) : resolveDevServerUrl(address, server.config, userConfig);
           fs.writeFileSync(pluginConfig.hotFile, viteDevServerUrl);
 
           setTimeout(() => {
@@ -207,16 +191,12 @@ function resolveWordPressPlugin(pluginConfig: Required<PluginConfig>): WordPress
           if (fs.existsSync(pluginConfig.hotFile)) {
             fs.rmSync(pluginConfig.hotFile);
           }
-
-          if (fs.existsSync(pluginConfig.tempDirectory)) {
-            fs.rmdirSync(pluginConfig.tempDirectory);
-          }
         };
 
         process.on('exit', clean);
-        process.on('SIGINT', () => process.exit);
-        process.on('SIGTERM', () => process.exit);
-        process.on('SIGHUP', () => process.exit);
+        process.on('SIGINT', () => process.exit());
+        process.on('SIGTERM', () => process.exit());
+        process.on('SIGHUP', () => process.exit());
 
         exitHandlersBound = true;
       }
@@ -254,14 +234,11 @@ function ensureCommandShouldRunInEnvironment(command: 'build' | 'serve', env: Re
   }
 }
 
-// TODO: Implement version functions for WordPress.
 /**
  * The version of WordPress being run.
  */
 // function wordpressVersion(): string {
-//   // TODO: Use WordPress API to check WP version
-
-//   return '';
+// TODO: Implement version functions for WordPress.
 // }
 
 /**
@@ -322,7 +299,7 @@ function resolvePluginConfig(config: string | string[] | PluginConfig): Required
     ssr: config.ssr ?? config.input,
     ssrOutputDirectory: config.ssrOutputDirectory ?? 'bootstrap/ssr',
     refresh: config.refresh ?? false,
-    hotFile: config.hotFile ?? path.join(config.tempDirectory ?? 'temp', 'hot'),
+    hotFile: config.hotFile ?? 'hot',
     settingsFile: config.settingsFile ?? 'vite.settings.json',
     detectTls: config.detectTls ?? null,
     transformOnServe: config.transformOnServe ?? ((code) => code),
@@ -345,35 +322,6 @@ function resolveInput(config: Required<PluginConfig>, ssr: boolean): string | st
   }
 
   return config.input;
-}
-
-/**
- * Resolve the Vite output path from the configuration.
- */
-function resolveOutput(): object {
-  const output = {
-    chunkFileNames: 'js/[name]-[hash].js',
-    entryFileNames: 'js/[name]-[hash].js',
-    assetFileNames: (name: string | undefined) => {
-      if (/\.(gif|jpe?g|png|svg)$/.test(name ?? '')) {
-        return 'images/[name]-[hash][extname]';
-      }
-
-      if (/\.css$/.test(name ?? '')) {
-        console.log(name);
-        return 'css/[name][extname]';
-      }
-
-      if (/\.js$/.test(name ?? '')) {
-        console.log(name);
-        return 'js/[name][extname]';
-      }
-
-      return '[name][extname]';
-    },
-  };
-
-  return output;
 }
 
 /**
@@ -418,7 +366,7 @@ function resolveFullReloadConfig({ refresh: config }: Required<PluginConfig>): P
 /**
  * Resolve the dev server URL from the server address and configuration.
  */
-function resolveDevServerUrl(address: AddressInfo, config: ResolvedConfig): DevServerUrl {
+function resolveDevServerUrl(address: AddressInfo, config: ResolvedConfig, userConfig: UserConfig): DevServerUrl {
   const configHMRProtocol = typeof config.server.hmr === 'object' ? config.server.hmr.protocol : null;
   const clientProtocol = configHMRProtocol ? (configHMRProtocol === 'wss' ? 'https' : 'http') : null;
   const serverProtocol = config.server.https ? 'https' : 'http';
@@ -426,8 +374,9 @@ function resolveDevServerUrl(address: AddressInfo, config: ResolvedConfig): DevS
 
   const configHMRHost = typeof config.server.hmr === 'object' ? config.server.hmr.host : null;
   const configHost = typeof config.server.host === 'string' ? config.server.host : null;
+  const sailHost = process.env.LARAVEL_SAIL && !userConfig.server?.host ? 'localhost' : null;
   const serverAddress = isIpv6(address) ? `[${address.address}]` : address.address;
-  const host = configHMRHost ?? configHost ?? serverAddress;
+  const host = configHMRHost ?? sailHost ?? configHost ?? serverAddress;
 
   const configHMRClientPort = typeof config.server.hmr === 'object' ? config.server.hmr.clientPort : null;
   const port = configHMRClientPort ?? address.port;
