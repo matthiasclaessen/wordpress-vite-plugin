@@ -5,3 +5,7 @@
 
 # Mac DS Store Folder
 .DS_Store
+
+# IDE Settings
+.idea/
+.vscode/
