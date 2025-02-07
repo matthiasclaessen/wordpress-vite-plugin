@@ -678,8 +678,6 @@ function resolveDevelopmentEnvironmentServerConfig(
   const resolvedHost =
     host === true || host === null ? getWordPressRootFolderName() : host;
 
-  console.log("Resolved host:", resolvedHost);
-
   // For Docker we assume certificates are directly in the configPath;
   // for other environments they are typically in a "Certificates" subdirectory.
   const certsDirectory =
@@ -722,16 +720,6 @@ function dirname(): string {
  * Adjust if the configuration directory for your environment differs.
  */
 function herdConfigPath(): string {
-  console.log(
-    path.resolve(
-      os.homedir(),
-      "Library",
-      "Application Support",
-      "Herd",
-      "config",
-      "valet"
-    )
-  );
   return path.resolve(
     os.homedir(),
     "Library",
