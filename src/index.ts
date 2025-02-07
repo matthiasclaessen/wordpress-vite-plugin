@@ -261,7 +261,7 @@ function resolveWordPressPlugin(
                   /:(\d+)/,
                   (_: string, port: string) => `:${colors.bold(port)}`
                 )
-              )}`
+              )}\n`
             );
 
             // Special log message if using a Herd certificate.
@@ -625,7 +625,7 @@ function resolveDevelopmentEnvironmentServerConfig(
   | undefined {
   // If TLS is disabled or explicitly turned off via devEnvironment, return undefined.
   if (host === false || devEnvironment === false) {
-    return;
+    return undefined;
   }
 
   // If auto-detect is enabled, try to determine the environment.
@@ -636,8 +636,8 @@ function resolveDevelopmentEnvironmentServerConfig(
       // On macOS, if Herd isn’t available, assume Valet.
       devEnvironment = "valet";
     } else {
-      // On other systems you might not have a TLS config. Fall back gracefully.
-      return;
+      // Otherwise, no TLS configuration is available.
+      return undefined;
     }
   }
 
@@ -667,18 +667,18 @@ function resolveDevelopmentEnvironmentServerConfig(
   }
 
   if (!configPath || !provider) {
-    throw new Error(
-      `Unable to locate the configuration directory for environment: ${devEnvironment}.`
+    console.warn(
+      `Unable to locate the configuration directory for environment: ${devEnvironment}. Falling back to insecure HTTP.`
     );
+
+    return undefined;
   }
 
   // Determine the resolved host name for certificate lookup.
   const resolvedHost =
-    host === true || host === null
-      ? path.basename(process.cwd()) +
-        "." +
-        resolveDevelopmentEnvironmentTld(configPath)
-      : host;
+    host === true || host === null ? getWordPressRootFolderName() : host;
+
+  console.log("Resolved host:", resolvedHost);
 
   // For Docker we assume certificates are directly in the configPath;
   // for other environments they are typically in a "Certificates" subdirectory.
@@ -691,22 +691,23 @@ function resolveDevelopmentEnvironmentServerConfig(
   const keyPath = path.resolve(certsDirectory, `${resolvedHost}.key`);
   const certPath = path.resolve(certsDirectory, `${resolvedHost}.crt`);
 
-  if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
-    throw new Error(
-      `Unable to find certificate files for host [${resolvedHost}] in [${configPath}/Certificates]. ` +
-        `Ensure your site is secured for the environment [${devEnvironment}].`
+  // If certificate files exist, use them; otherwise, log a warning and fall back.
+  if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
+    return {
+      hmr: { host: resolvedHost },
+      host: resolvedHost,
+      https: {
+        key: fs.readFileSync(keyPath),
+        cert: fs.readFileSync(certPath),
+        certificateProvider: provider,
+      },
+    };
+  } else {
+    console.warn(
+      `Certificate files for host [${resolvedHost}] not found in [${certsDirectory}]. Falling back to insecure HTTP.`
     );
+    return undefined;
   }
-
-  return {
-    hmr: { host: resolvedHost },
-    host: resolvedHost,
-    https: {
-      key: fs.readFileSync(keyPath),
-      cert: fs.readFileSync(certPath),
-      certificateProvider: provider,
-    },
-  };
 }
 
 /**
@@ -721,6 +722,16 @@ function dirname(): string {
  * Adjust if the configuration directory for your environment differs.
  */
 function herdConfigPath(): string {
+  console.log(
+    path.resolve(
+      os.homedir(),
+      "Library",
+      "Application Support",
+      "Herd",
+      "config",
+      "valet"
+    )
+  );
   return path.resolve(
     os.homedir(),
     "Library",
@@ -782,16 +793,39 @@ function dockerConfigPath(): string {
 /**
  * Read the TLD from the development environment configuration.
  */
-function resolveDevelopmentEnvironmentTld(configPath: string): string {
-  const configFile = path.resolve(configPath, "config.json");
+// function resolveDevelopmentEnvironmentTld(configPath: string): string {
+//   const configFile = path.resolve(configPath, "config.json");
 
-  if (!fs.existsSync(configFile)) {
-    throw new Error(`Unable to find the configuration file [${configFile}].`);
+//   if (!fs.existsSync(configFile)) {
+//     throw new Error(`Unable to find the configuration file [${configFile}].`);
+//   }
+
+//   const config: { tld: string } = JSON.parse(
+//     fs.readFileSync(configFile, "utf-8")
+//   );
+
+//   return config.tld;
+// }
+
+/**
+ * Walk upward from the current working directory until a file named "wp-config.php" is found.
+ * Return the basename of the directory that contains it.
+ * If not found, fall back to the current working directory's basename.
+ */
+function getWordPressRootFolderName(): string {
+  let dir = process.cwd();
+  /*eslint no-constant-condition: ["error", { "checkLoops": false }]*/
+  while (true) {
+    if (fs.existsSync(path.join(dir, "wp-config.php"))) {
+      return path.basename(dir);
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      // Reached the filesystem root; give up.
+      break;
+    }
+    dir = parent;
   }
-
-  const config: { tld: string } = JSON.parse(
-    fs.readFileSync(configFile, "utf-8")
-  );
-
-  return config.tld;
+  // Fallback to process.cwd() if no wp-config.php is found.
+  return path.basename(process.cwd());
 }
