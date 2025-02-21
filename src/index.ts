@@ -88,10 +88,17 @@ let exitHandlersBound = false;
 // Default refresh paths – checks if the base directories exist.
 // The filter removes any glob pattern that, when trimmed, does not exist.
 export const refreshPaths = [
-  "*.php",
-  "templates/**/*.php",
-  "functions/*.php",
-].filter((path) => fs.existsSync(path.replace(/\*\*$/, "")));
+  "*.php", // PHP files in the root folder
+  "**/*.php", // PHP files in any subdirectory
+  "src/**/*.scss",
+  "src/**/*.js",
+].filter((pattern) => {
+  if (pattern.includes("*")) {
+    return true;
+  }
+
+  return fs.existsSync(pattern);
+});
 
 // ============================================================
 // Main Plugin Function
@@ -261,8 +268,22 @@ function resolveWordPressPlugin(
                   /:(\d+)/,
                   (_: string, port: string) => `:${colors.bold(port)}`
                 )
-              )}\n`
+              )}`
             );
+            const wpVersion = getWordPressVersion();
+            if (wpVersion) {
+              server.config.logger.info(
+                `  ${colors.green("➜")}  WordPress version: ${colors.bold(
+                  wpVersion
+                )}\n`
+              );
+            } else {
+              server.config.logger.warn(
+                `  ${colors.yellow(
+                  "➜"
+                )}  WordPress version could not be determined.\n`
+              );
+            }
 
             // Special log message if using a Herd certificate.
             if (
@@ -309,6 +330,8 @@ function resolveWordPressPlugin(
                 .toString()
                 .replace(/{{ APP_URL }}/g, appUrl)
             );
+
+            return;
           }
           next();
         });
@@ -336,7 +359,7 @@ function ensureCommandShouldRunInEnvironment(
 
   if (typeof env.CI !== "undefined") {
     throw Error(
-      "You should not run the Vite HMR server in CI environments. You should build your assets for production instead. To disable this ENV check you may set LARAVEL_BYPASS_ENV_CHECK=1"
+      "You should not run the Vite HMR server in CI environments. You should build your assets for production instead. To disable this ENV check you may set WORDPRESS_BYPASS_ENV_CHECK=1"
     );
   }
 }
@@ -409,7 +432,7 @@ function resolvePluginConfig(
   }
 
   // If refresh is enabled as a boolean, convert to default refresh configuration.
-  if (config.refresh === true) {
+  if (config.refresh === undefined || config.refresh === true) {
     config.refresh = [{ paths: refreshPaths }];
   }
 
@@ -676,7 +699,11 @@ function resolveDevelopmentEnvironmentServerConfig(
 
   // Determine the resolved host name for certificate lookup.
   const resolvedHost =
-    host === true || host === null ? getWordPressRootFolderName() : host;
+    host === true || host === null
+      ? getWordPressRootFolderName() +
+        "." +
+        resolveDevelopmentEnvironmentTld(configPath)
+      : host;
 
   // For Docker we assume certificates are directly in the configPath;
   // for other environments they are typically in a "Certificates" subdirectory.
@@ -770,9 +797,9 @@ function dockerConfigPath(): string {
 
   const possiblePaths = ["/etc/ssl/docker", "/certs", "/run/secrets"];
 
-  for (const path of possiblePaths) {
-    if (fs.existsSync(path)) {
-      return path;
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      return p;
     }
   }
   throw new Error("Unable to locate the Docker SSL certificates directory.");
@@ -781,19 +808,19 @@ function dockerConfigPath(): string {
 /**
  * Read the TLD from the development environment configuration.
  */
-// function resolveDevelopmentEnvironmentTld(configPath: string): string {
-//   const configFile = path.resolve(configPath, "config.json");
+function resolveDevelopmentEnvironmentTld(configPath: string): string {
+  const configFile = path.resolve(configPath, "config.json");
 
-//   if (!fs.existsSync(configFile)) {
-//     throw new Error(`Unable to find the configuration file [${configFile}].`);
-//   }
+  if (!fs.existsSync(configFile)) {
+    throw new Error(`Unable to find the configuration file [${configFile}].`);
+  }
 
-//   const config: { tld: string } = JSON.parse(
-//     fs.readFileSync(configFile, "utf-8")
-//   );
+  const config: { tld: string } = JSON.parse(
+    fs.readFileSync(configFile, "utf-8")
+  );
 
-//   return config.tld;
-// }
+  return config.tld;
+}
 
 /**
  * Walk upward from the current working directory until a file named "wp-config.php" is found.
@@ -816,4 +843,37 @@ function getWordPressRootFolderName(): string {
   }
   // Fallback to process.cwd() if no wp-config.php is found.
   return path.basename(process.cwd());
+}
+
+/**
+ * Walk upward from process.cwd() until a file named "wp-config.php" is found.
+ * Returns the directory path containing that file.
+ * If not found, returns process.cwd().
+ */
+function getWordPressRootFolderPath(): string {
+  let dir = process.cwd();
+  while (true) {
+    if (fs.existsSync(path.join(dir, "wp-config.php"))) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return process.cwd();
+}
+
+/**
+ * Read and parse the WordPress version from wp-includes/version.php.
+ * Returns an empty string if the file isn’t found or parsing fails.
+ */
+function getWordPressVersion(): string {
+  const wpRoot = getWordPressRootFolderPath();
+  const versionFile = path.join(wpRoot, "wp-includes", "version.php");
+  if (!fs.existsSync(versionFile)) {
+    return "";
+  }
+  const content = fs.readFileSync(versionFile, "utf8");
+  const match = content.match(/\$wp_version\s*=\s*'([^']+)'/);
+  return match && match[1] ? match[1] : "";
 }
